@@ -4,12 +4,14 @@ use App\Livewire\WebsiteSummarizer;
 use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
 
-test('home page displays the website summarizer', function () {
+test('home page displays the dual-engine website summarizer', function () {
     $response = $this->get(route('home'));
 
     $response->assertOk()
-        ->assertSee('AI Website Summarizer')
-        ->assertSee('Enter a website URL and get an AI-powered summary.')
+        ->assertSee('AI Website')
+        ->assertSee('Summarizer')
+        ->assertSee('OpenRouter')
+        ->assertSee('Groq LPU')
         ->assertSee('Summarize Website');
 });
 
@@ -60,6 +62,7 @@ MARKDOWN;
 
     Livewire::test(WebsiteSummarizer::class)
         ->set('url', 'https://example.com/guide')
+        ->set('provider', 'openrouter')
         ->set('language', 'en')
         ->call('summarize')
         ->assertSet('websiteTitle', 'Laravel Framework Guide')
@@ -67,6 +70,56 @@ MARKDOWN;
         ->assertSee('Laravel is a modern PHP web application framework')
         ->assertSee('Summary Ready')
         ->assertSee('Copy Summary')
+        ->assertHasNoErrors();
+});
+
+test('successfully summarizes a website using mocked Groq response', function () {
+    config()->set('services.groq.key', 'test-groq-key');
+
+    $fakeHtml = <<<'HTML'
+<!DOCTYPE html>
+<html>
+<head><title>Fast Web Services</title></head>
+<body>
+    <article>
+        <h1>High Performance Systems</h1>
+        <p>Groq provides ultra-fast inference processors known as LPUs that deliver deterministic real-time compute at massive speeds.</p>
+    </article>
+</body>
+</html>
+HTML;
+
+    $mockSummaryGroq = <<<'MARKDOWN'
+### 📌 Overview
+Groq delivers high-performance LPU compute for instantaneous inference.
+
+### 🔑 Key Highlights
+- Ultra low latency processing.
+- High token throughput.
+MARKDOWN;
+
+    Http::fake([
+        'https://example.com*' => Http::response($fakeHtml, 200, ['Content-Type' => 'text/html']),
+        'https://api.groq.com/openai/v1/chat/completions' => Http::response([
+            'choices' => [
+                [
+                    'message' => [
+                        'content' => $mockSummaryGroq,
+                    ],
+                ],
+            ],
+        ], 200),
+    ]);
+
+    Livewire::test(WebsiteSummarizer::class)
+        ->set('url', 'https://example.com/groq-fast')
+        ->set('provider', 'groq')
+        ->set('language', 'en')
+        ->call('summarize')
+        ->assertSet('websiteTitle', 'Fast Web Services')
+        ->assertSet('summary', $mockSummaryGroq)
+        ->assertSee('Groq delivers high-performance LPU compute')
+        ->assertSee('Groq (LPU™ Fast)')
         ->assertHasNoErrors();
 });
 
@@ -94,7 +147,7 @@ test('successfully summarizes a website in Bengali by default', function () {
         ->assertSet('language', 'bn')
         ->call('summarize')
         ->assertSet('summary', $mockSummaryBn)
-        ->assertSee('বাংলা সারসংক্ষেপ প্রস্তুত')
+        ->assertSee('সারসংক্ষেপ সম্পন্ন')
         ->assertSee('সারসংক্ষেপ কপি করুন')
         ->assertHasNoErrors();
 });
@@ -152,9 +205,25 @@ test('handles missing OpenRouter API key gracefully', function () {
 
     Livewire::test(WebsiteSummarizer::class)
         ->set('url', 'https://example.com')
+        ->set('provider', 'openrouter')
         ->call('summarize')
         ->assertSet('summary', null)
         ->assertSee('OpenRouter API key is not configured');
+});
+
+test('handles missing Groq API key gracefully with helpful switch prompt', function () {
+    config()->set('services.groq.key', '');
+
+    Http::fake([
+        'https://example.com*' => Http::response('<html><head><title>Test</title></head><body><p>This is plenty of text to ensure it passes the minimum readable text extraction requirement.</p></body></html>', 200, ['Content-Type' => 'text/html']),
+    ]);
+
+    Livewire::test(WebsiteSummarizer::class)
+        ->set('url', 'https://example.com')
+        ->set('provider', 'groq')
+        ->call('summarize')
+        ->assertSet('summary', null)
+        ->assertSee('Groq API key is not configured');
 });
 
 test('handles OpenRouter API rate limit error gracefully', function () {
@@ -167,6 +236,7 @@ test('handles OpenRouter API rate limit error gracefully', function () {
 
     Livewire::test(WebsiteSummarizer::class)
         ->set('url', 'https://example.com')
+        ->set('provider', 'openrouter')
         ->call('summarize')
         ->assertSet('summary', null)
         ->assertSee('OpenRouter rate limit reached');

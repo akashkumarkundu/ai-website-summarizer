@@ -2,6 +2,7 @@
 
 namespace App\Livewire;
 
+use App\Services\GroqService;
 use App\Services\OpenRouterService;
 use App\Services\WebsiteContentFetcher;
 use Illuminate\Contracts\View\View;
@@ -15,6 +16,16 @@ class WebsiteSummarizer extends Component
      */
     #[Validate]
     public string $url = '';
+
+    /**
+     * Selected AI Provider ('openrouter' or 'groq').
+     */
+    public string $provider = 'openrouter';
+
+    /**
+     * Output language: 'bn' (Bengali) or 'en' (English).
+     */
+    public string $language = 'bn';
 
     /**
      * Extracted website title.
@@ -37,14 +48,19 @@ class WebsiteSummarizer extends Component
     public ?string $summarizedUrl = null;
 
     /**
+     * Inference / execution time in seconds.
+     */
+    public ?float $executionTime = null;
+
+    /**
+     * Name of the provider used for the current summary.
+     */
+    public ?string $activeProviderName = null;
+
+    /**
      * User-facing error message.
      */
     public ?string $errorMessage = null;
-
-    /**
-     * Output language: 'bn' (Bengali) or 'en' (English).
-     */
-    public string $language = 'bn';
 
     /**
      * Validation rules.
@@ -55,6 +71,7 @@ class WebsiteSummarizer extends Component
     {
         return [
             'url' => ['required', 'string', 'url:http,https', 'max:2048'],
+            'provider' => ['required', 'string', 'in:openrouter,groq'],
             'language' => ['required', 'string', 'in:bn,en'],
         ];
     }
@@ -74,10 +91,13 @@ class WebsiteSummarizer extends Component
     }
 
     /**
-     * Process the URL and generate an AI summary.
+     * Process the URL and generate an AI summary with the selected provider.
      */
-    public function summarize(WebsiteContentFetcher $fetcher, OpenRouterService $ai): void
-    {
+    public function summarize(
+        WebsiteContentFetcher $fetcher,
+        OpenRouterService $openRouter,
+        GroqService $groq,
+    ): void {
         $trimmed = trim($this->url);
         if ($trimmed !== '' && ! preg_match('#^https?://#i', $trimmed) && str_contains($trimmed, '.')) {
             $trimmed = 'https://'.$trimmed;
@@ -91,6 +111,10 @@ class WebsiteSummarizer extends Component
         $this->websiteTitle = null;
         $this->charCount = null;
         $this->summarizedUrl = null;
+        $this->executionTime = null;
+
+        $aiService = $this->provider === 'groq' ? $groq : $openRouter;
+        $startTime = microtime(true);
 
         try {
             $extracted = $fetcher->fetch($this->url);
@@ -99,12 +123,15 @@ class WebsiteSummarizer extends Component
             $this->charCount = $extracted['char_count'];
             $this->summarizedUrl = $extracted['url'];
 
-            $this->summary = $ai->summarize(
+            $this->summary = $aiService->summarize(
                 text: $extracted['text'],
                 title: $extracted['title'],
                 url: $extracted['url'],
                 language: $this->language,
             );
+
+            $this->executionTime = round(microtime(true) - $startTime, 2);
+            $this->activeProviderName = $aiService->getProviderName();
         } catch (\Throwable $e) {
             $this->errorMessage = $e->getMessage();
         }
@@ -115,7 +142,7 @@ class WebsiteSummarizer extends Component
      */
     public function resetSummarizer(): void
     {
-        $this->reset(['url', 'websiteTitle', 'summary', 'charCount', 'summarizedUrl', 'errorMessage']);
+        $this->reset(['url', 'websiteTitle', 'summary', 'charCount', 'summarizedUrl', 'executionTime', 'errorMessage']);
         $this->resetValidation();
     }
 

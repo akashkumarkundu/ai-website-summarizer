@@ -2,11 +2,12 @@
 
 namespace App\Services;
 
+use App\Contracts\AiSummarizerInterface;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
-class OpenRouterService
+class OpenRouterService implements AiSummarizerInterface
 {
     /**
      * The OpenRouter API key.
@@ -145,5 +146,13 @@ PROMPT;
         }
 
         return trim($summary);
+    }
+
+    /**
+     * Get the human-readable provider name.
+     */
+    public function getProviderName(): string
+    {
+        return 'OpenRouter (Multi-Model)';
     }
 }
